@@ -74,6 +74,26 @@ cat "$M_FAT/PLAN9.INI"
 sync -f "$M_FAT" 2>/dev/null || true
 sudo umount "$M_FAT"
 sudo qemu-nbd --disconnect "$NBD"
+
+# `qemu-nbd --disconnect` returns as soon as the KERNEL client is torn down,
+# but the qemu-nbd SERVER process spawned by `--connect` still holds an
+# exclusive write lock on the image and exits only asynchronously. The very
+# next build step (createVMFromVHD -> `qemu-img resize +200G`) needs that
+# write lock and dies with "Failed to get write lock / Is another process
+# using the image?" if it races the release (seen on a GitHub runner; local
+# timing happened to win). Wait for release with two signals: the kernel nbd
+# binding (/sys/block/<nbd>/pid exists only while connected) is gone, AND a
+# write-lock probe on the image succeeds (a +0 resize is a no-op that still
+# takes the exact lock the real resize needs).
+_nbd_name="$(basename "$NBD")"
+for _try in $(seq 1 120); do
+  if [ ! -e "/sys/block/${_nbd_name}/pid" ] \
+     && qemu-img resize "$_qcow" +0 >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+sync
 trap - EXIT
 
 sudo chmod 0666 "$_qcow" 2>/dev/null || true
