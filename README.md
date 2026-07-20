@@ -14,7 +14,7 @@ All the supported releases are here:
 
 | Release (9front) | x86_64 (amd64) |
 |------------------|----------------|
-| 11554            |  ⏳ (pending CI)  |
+| 11554            |  ✅ (9p)  |
 
 
 
