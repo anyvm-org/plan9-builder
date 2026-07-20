@@ -20,11 +20,13 @@
 
 set -e
 
-echo "Preparing ${VM_OS_NAME}.qcow2 (9front) via qemu-nbd"
+# build.py writes the working image under build/ (VM_WORK_QCOW); fall back to
+# the repo-root name for a standalone hook run.
+_qcow="${VM_WORK_QCOW:-${VM_OS_NAME}.qcow2}"
+echo "Preparing ${_qcow} (9front) via qemu-nbd"
 
-_qcow="${VM_OS_NAME}.qcow2"
 NBD=/dev/nbd0
-M_FAT="$(pwd)/mnt-plan9-9fat"
+M_FAT="$(pwd)/${VM_WORKDIR:+$VM_WORKDIR/}mnt-plan9-9fat"
 
 _cleanup() {
   sudo umount "$M_FAT" 2>/dev/null || true
