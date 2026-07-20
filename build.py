@@ -139,8 +139,24 @@ def _sh_loud(cmdstr):
     return rc
 
 
+# All build-GENERATED files -- state (pid/ports/cmdline), logs, the working
+# qcow2, download intermediates, the web console (index.html/screen.png), and
+# the final release artifacts (<output>.qcow2.zst + sidecars) -- live under
+# WORKDIR so the builder repo root stays clean. INPUTS (conf/, hooks/, files/,
+# .github/, the conf's VM_* paths) stay at the repo root and are read from
+# there; they are never routed through wf(). The CI upload step
+# (base-builder/.github/tpl/build.tpl.yml) picks the release artifacts up from
+# this same WORKDIR -- keep the two in lock-step.
+WORKDIR = "build"
+
+
+def wf(name):
+    """Path of a build-generated file, kept under WORKDIR."""
+    return os.path.join(WORKDIR, name)
+
+
 def state(osname, suffix):
-    return "%s.%s" % (osname, suffix)
+    return wf("%s.%s" % (osname, suffix))
 
 
 def read_state(osname, suffix, default=""):
@@ -737,13 +753,13 @@ def build_qemu_args(media_kind=None, media_path=None):
     """Build the full QEMU argv. media_kind is None / 'cdrom' / 'disk'."""
     osname = env("VM_OS_NAME")
     arch = env("VM_ARCH") or "x86_64"
-    qcow = "%s.qcow2" % osname
+    qcow = wf("%s.qcow2" % osname)
     sshport = read_state(osname, "sshport") or "22"
 
     monport = free_port(4444, 4544); write_state(osname, "monport", monport)
     serport = free_port(7000, 9000); write_state(osname, "serport", serport)
     vncport = free_port(5900, 5999); write_state(osname, "vncport", vncport)
-    serlog = "%s.serial.log" % osname
+    serlog = serial_log(osname)
     try: os.remove(serlog)
     except OSError: pass
 
@@ -815,8 +831,8 @@ def build_qemu_args(media_kind=None, media_path=None):
         a += ["-bios", env("VM_BIOS")]
 
     if arch == "aarch64":
-        efi = "%s-QEMU_EFI.fd" % osname
-        varsf = "%s-QEMU_EFI_VARS.fd" % osname
+        efi = wf("%s-QEMU_EFI.fd" % osname)
+        varsf = wf("%s-QEMU_EFI_VARS.fd" % osname)
         code_src = _find_aarch64_efi_code(resolve_qemu_bin())
         if not os.path.exists(efi):
             if not code_src:
@@ -1430,14 +1446,15 @@ def launch_qemu(media_kind=None, media_path=None):
         f.write(" ".join(cmd) + "\n")
     log("Launching QEMU for %s:" % osname)
     log(" ".join(cmd))
-    logf = open("%s.qemu.log" % osname, "ab")
+    qemulog = wf("%s.qemu.log" % osname)
+    logf = open(qemulog, "ab")
     p = subprocess.Popen(cmd, stdin=DEVNULL, stdout=logf, stderr=logf,
                          start_new_session=True)
     write_state(osname, "pid", p.pid)
     time.sleep(1)
     if p.poll() is not None:
-        log("QEMU failed to start for %s; tail of %s.qemu.log:" % (osname, osname))
-        log(tail_file("%s.qemu.log" % osname, 50))
+        log("QEMU failed to start for %s; tail of %s:" % (osname, qemulog))
+        log(tail_file(qemulog, 50))
         return 1
     log("QEMU started: pid=%d vnc=127.0.0.1::%s monitor=%s serial=%s"
         % (p.pid, read_state(osname, "vncport"), read_state(osname, "monport"),
@@ -1635,7 +1652,7 @@ def download(link=None, fileout=None):
 def serial_log(osname):
     """The QEMU-written serial log file. Set up by build_qemu_args() via
     `-chardev socket,...,logfile=...` and truncated each launch_qemu()."""
-    return "%s.serial.log" % osname
+    return wf("%s.serial.log" % osname)
 
 
 _console_sessions = {}     # osname -> ConsoleSession
@@ -1934,10 +1951,10 @@ def setup(install_ocr=None):
 def createVM(isolink=None, sshport=None, disklink=None):
     osname = _check_osname("createVM")
     if not osname: return 1
-    vdi = "%s.qcow2" % osname
-    iso = "%s.iso" % osname
+    vdi = wf("%s.qcow2" % osname)
+    iso = wf("%s.iso" % osname)
     if isolink.endswith("img"):
-        iso = "%s.img" % osname
+        iso = wf("%s.img" % osname)
     if not os.path.exists(iso):
         download(isolink, iso)
         if isolink.endswith("bz2"):
@@ -1967,7 +1984,7 @@ def createVM(isolink=None, sshport=None, disklink=None):
 def createVMFromVHD(sshport=None):
     osname = _check_osname("createVMFromVHD")
     if not osname: return 1
-    vhd = "%s.qcow2" % osname
+    vhd = wf("%s.qcow2" % osname)
     must_run(["qemu-img", "resize", vhd, "+200G"], "qemu-img resize")
     write_state(osname, "sshport", sshport or "22")
     log("createVMFromVHD: %s prepared (sshport=%s). startVM will boot it."
@@ -2024,7 +2041,7 @@ def _serial_tail_line(window=4096):
     Used to show what the guest is actually doing during long waits."""
     osname = env("VM_OS_NAME")
     if not osname: return 0, ""
-    path = "%s.serial.log" % osname
+    path = serial_log(osname)
     try:
         size = os.path.getsize(path)
         with open(path, "rb") as f:
@@ -2114,11 +2131,11 @@ def clearVM():
     if isRunning() == 0:
         destroyVM()
     closeConsole()
-    for f in ["%s.qcow2" % osname, "%s.img" % osname, "%s.pid" % osname,
-              "%s.monport" % osname, "%s.serport" % osname, "%s.sshport" % osname,
-              "%s.vncport" % osname,
-              "%s.serial.log" % osname, "%s.qemu.log" % osname, "%s.cmdline" % osname,
-              "%s-QEMU_EFI.fd" % osname, "%s-QEMU_EFI_VARS.fd" % osname]:
+    for f in [wf("%s.qcow2" % osname), wf("%s.img" % osname), wf("%s.pid" % osname),
+              wf("%s.monport" % osname), wf("%s.serport" % osname), wf("%s.sshport" % osname),
+              wf("%s.vncport" % osname),
+              wf("%s.serial.log" % osname), wf("%s.qemu.log" % osname), wf("%s.cmdline" % osname),
+              wf("%s-QEMU_EFI.fd" % osname), wf("%s-QEMU_EFI_VARS.fd" % osname)]:
         try: os.remove(f)
         except OSError: pass
     try: os.remove(os.path.join(HOME, ".ssh", "known_hosts"))
@@ -2256,7 +2273,7 @@ def _write_index_html(text):
             "<body onclick='stop()' style='background-color:grey;'>\n\n"
             "<img src='screen.png' alt='Screen'>\n\n<br>\n<pre>\n"
             % (env("VM_OS_NAME") or "", env("VM_RELEASE")))
-    with open("index.html", "w") as f:
+    with open(wf("index.html"), "w") as f:
         f.write(head); f.write(text); f.write("</pre></body></html>\n")
 
 
@@ -2274,7 +2291,7 @@ def _screen_text_value(img=None):
             try: os.remove(png)
             except OSError: pass
     if img:
-        with open("screen.txt", "w") as f:
+        with open(wf("screen.txt"), "w") as f:
             f.write(text)
         _write_index_html(text)
     return text
@@ -2376,7 +2393,7 @@ def waitForText(text=None, sec="", hook=None):
                 log("waitForText hook raised: %s" % e)
         time.sleep(3)
         screen = _screen_text_value(None)
-        with open("_screenText.txt", "w") as f:
+        with open(wf("_screenText.txt"), "w") as f:
             f.write(screen)
         # Dump only what has never been printed before: re-printing the whole
         # 50-line window every 3 s buried the build log in repetition. The
@@ -2405,15 +2422,16 @@ def startWeb(needOCR=None):
     daemon thread (was a detached subprocess)."""
     osname = _check_osname("startWeb")
     if not osname: return 1
-    try: os.remove("_stopvnc.txt")
+    try: os.remove(wf("_stopvnc.txt"))
     except OSError: pass
-    # The HTTP server can stay as a detached subprocess: it shares cwd with us
-    # and only serves whatever screenshots / OCR text we drop into the dir.
-    subprocess.Popen([sys.executable, "-m", "http.server"],
+    # The HTTP server can stay as a detached subprocess. It serves WORKDIR
+    # (not the repo root) via --directory, so the screenshots / OCR text /
+    # index.html we drop into WORKDIR are the console content.
+    subprocess.Popen([sys.executable, "-m", "http.server", "--directory", WORKDIR],
                     stdin=DEVNULL, stdout=DEVNULL, stderr=DEVNULL,
                     start_new_session=True)
-    if not os.path.exists("index.html"):
-        with open("index.html", "w") as f:
+    if not os.path.exists(wf("index.html")):
+        with open(wf("index.html"), "w") as f:
             f.write("<!DOCTYPE html>\n<html>\n<head>\n<title>%s</title>\n"
                     "<meta http-equiv='refresh' content='1'>\n</head>\n"
                     "<body style='background-color:grey;'>\n\n"
@@ -2421,9 +2439,9 @@ def startWeb(needOCR=None):
 
     def loop():
         while not _startweb_stop.is_set():
-            if not os.path.exists("_stopvnc.txt"):
+            if not os.path.exists(wf("_stopvnc.txt")):
                 try:
-                    _screen_text_value("screen.png")
+                    _screen_text_value(wf("screen.png"))
                 except Exception:
                     pass
             time.sleep(3)
@@ -2434,7 +2452,7 @@ def startWeb(needOCR=None):
 
 
 def pauseVNC():
-    open("_stopvnc.txt", "w").close()
+    open(wf("_stopvnc.txt"), "w").close()
     return 0
 
 
@@ -2518,7 +2536,7 @@ def exportOVA(ova=None, qemu_args=None):
     if not osname: return 1
     if not ova:
         log("Usage: exportOVA out.qcow2 [out.qemu]"); return 1
-    src = "%s.qcow2" % osname
+    src = wf("%s.qcow2" % osname)
     log(src)
     # Stage 1: qemu-img convert the work disk into a fresh, compacted /
     # sparsified qcow2 at the release path. qemu-img refuses to use the same
@@ -3306,14 +3324,14 @@ def restart_and_wait():
 def _prep_vhd_disk(link):
     """Materialize $osname.qcow2 from a published cloud image URL."""
     osname = env("VM_OS_NAME")
-    qcow = "%s.qcow2" % osname
+    qcow = wf("%s.qcow2" % osname)
     if os.path.exists(qcow): return
     # download() aborts the build itself on an unrecoverable download; every
     # decompress / image-convert below uses must_run/must_sh so a failure there
     # also aborts (FATAL + exit 1) rather than silently leaving a corrupt qcow2
     # that only blows up much later at boot.
     if link.endswith("img.gz"):
-        img = "%s.img" % osname
+        img = wf("%s.img" % osname)
         if not os.path.exists(img):
             try: os.remove(img + ".gz")
             except OSError: pass
@@ -3323,7 +3341,7 @@ def _prep_vhd_disk(link):
         must_run(["qemu-img", "convert", "-f", "raw", "-O", "qcow2",
                   "-o", "preallocation=off", img, qcow], "qemu-img convert")
     elif link.endswith("img.zst"):
-        img = "%s.img" % osname
+        img = wf("%s.img" % osname)
         if not os.path.exists(img):
             try: os.remove(img + ".zst")
             except OSError: pass
@@ -3341,9 +3359,9 @@ def _prep_vhd_disk(link):
         # semantics as the img.gz branch): clearVM() deletes the qcow2 on
         # every run, so removing the .img would force a full re-download +
         # re-extract on each rebuild attempt.
-        img = "%s.img" % osname
+        img = wf("%s.img" % osname)
         if not os.path.exists(img):
-            tarball = "%s.imgtar" % osname
+            tarball = wf("%s.imgtar" % osname)
             comp = "z" if link.endswith(".gz") else "J"
             tarcmd = ("tar -x%sf %s --wildcards -O '*.img' > %s"
                       % (comp, shlex.quote(tarball), shlex.quote(img)))
@@ -3358,7 +3376,7 @@ def _prep_vhd_disk(link):
         must_run(["qemu-img", "convert", "-f", "raw", "-O", "qcow2",
                   "-o", "preallocation=off", img, qcow], "qemu-img convert")
     elif link.endswith(".img"):
-        tmp = "%s.download.img" % osname
+        tmp = wf("%s.download.img" % osname)
         if not os.path.exists(tmp):
             download(link, tmp)
         must_run(["qemu-img", "convert", "-O", "qcow2", "-o", "preallocation=off",
@@ -3368,7 +3386,7 @@ def _prep_vhd_disk(link):
     elif link.endswith(".qcow2.gz"):
         # gzip-compressed qcow2 (9front publishes its prebuilt images this
         # way). gunzip to a temp qcow2, then the usual convert re-sparsifies.
-        tmp = "%s.download.qcow2" % osname
+        tmp = wf("%s.download.qcow2" % osname)
         if not os.path.exists(tmp):
             gz = tmp + ".gz"
             try: os.remove(gz)
@@ -3383,7 +3401,7 @@ def _prep_vhd_disk(link):
         try: os.remove(tmp)
         except OSError: pass
     elif link.endswith(".qcow2"):
-        tmp = "%s.download.qcow2" % osname
+        tmp = wf("%s.download.qcow2" % osname)
         if not os.path.exists(tmp):
             download(link, tmp)
         must_run(["qemu-img", "convert", "-O", "qcow2", "-o", "preallocation=off",
@@ -3413,10 +3431,10 @@ def _gen_enablessh_local():
     pub_path = idrsa + ".pub"
     pub = open(pub_path).read().rstrip("\n")
 
-    try: os.remove("enablessh.local")
+    try: os.remove(wf("enablessh.local"))
     except OSError: pass
-    shutil.copy("enablessh.txt", "enablessh.local")
-    with open("enablessh.local", "a") as f:
+    shutil.copy("enablessh.txt", wf("enablessh.local"))
+    with open(wf("enablessh.local"), "a") as f:
         f.write("echo '%s' >>~/.ssh/authorized_keys\n\n\n\n" % pub)
         b64 = base64.b64encode(pub.encode("utf-8")).decode("ascii")
         f.write("echo '%s' | openssl base64 -d >>~/.ssh/authorized_keys\n\n\n"
@@ -3441,7 +3459,7 @@ def _gen_enablessh_local():
         f.write("grep -q '^StrictModes no' /etc/ssh/sshd_config || "
                 "echo 'StrictModes no' >> /etc/ssh/sshd_config\n")
         f.write("chmod u-w /etc/ssh/sshd_config 2>/dev/null || true\n\n\n")
-    log(open("enablessh.local").read())
+    log(open(wf("enablessh.local")).read())
 
 
 def _enable_ssh_root_branch(sshport):
@@ -3450,7 +3468,7 @@ def _enable_ssh_root_branch(sshport):
     (the guest's 192.168.122.x is not host-reachable)."""
     vmip = getVMIP()
     log("guest slirp ip: %s (connecting via hostfwd 127.0.0.1:%s)" % (vmip, sshport))
-    with open("enablessh.local", "rb") as inp:
+    with open(wf("enablessh.local"), "rb") as inp:
         subprocess.run(
             ["sshpass", "-p", env("VM_ROOT_PASSWORD"), "ssh", "-p", str(sshport),
              "-o", "StrictHostKeyChecking=no",
@@ -3488,11 +3506,11 @@ def _enable_ssh_console_branch():
     if run_hook("enableNetwork"):
         screenText(); time.sleep(60)
     if env("VM_USE_NC_ENABLE_SSH"):
-        inputFileNC("enablessh.local")
+        inputFileNC(wf("enablessh.local"))
     elif env("VM_USE_BASH_ENABLE_SSH"):
-        inputFileBash("enablessh.local")
+        inputFileBash(wf("enablessh.local"))
     else:
-        inputFile("enablessh.local")
+        inputFile(wf("enablessh.local"))
     time.sleep(60); screenText(); time.sleep(10)
     inputKeys("enter"); time.sleep(2)
     inputKeys("enter"); time.sleep(2)
@@ -3533,6 +3551,11 @@ def main(argv):
     if not conf_load(conf_path):
         return 1
 
+    # Everything the build generates lives under WORKDIR (keeps the repo root
+    # clean; see wf()). Create it before any hook / setup / QEMU launch writes
+    # into it.
+    os.makedirs(WORKDIR, exist_ok=True)
+
     # Expose pipeline globals to hooks (so hook code can use bare `osname`
     # etc., mirroring how build.sh's source-d hooks saw shell variables).
     g = globals()
@@ -3542,6 +3565,14 @@ def main(argv):
     osname = g["osname"]
     sshport = g["sshport"]
     opts = g["opts"]
+
+    # Tell hooks where the generated files live. build.py routes the working
+    # qcow2 (and everything else) under WORKDIR via wf(); host_* hooks that
+    # operate on that image -- prepareImage / finalizeImage doing qemu-nbd /
+    # virt-customize -- must target the SAME path, so export it. Hooks read
+    # `$VM_WORK_QCOW` (fall back to `${VM_OS_NAME}.qcow2` for standalone runs).
+    os.environ["VM_WORKDIR"] = WORKDIR
+    os.environ["VM_WORK_QCOW"] = wf("%s.qcow2" % osname)
 
     # Earliest hook point: runs before setup() (which, among other things,
     # extracts VM_QEMU_TAR), so a builder can generate build inputs on the
@@ -3655,6 +3686,11 @@ def main(argv):
     output = "%s-%s" % (osname, env("VM_RELEASE"))
     if env("VM_ARCH"):
         output = "%s-%s" % (output, env("VM_ARCH"))
+    # Route every release-artifact file (<output>.qcow2.zst + -id_rsa.pub /
+    # -host.id_rsa / .qemu / .profile.json sidecars) into WORKDIR by making the
+    # shared basename a WORKDIR-relative path prefix. The CI upload step
+    # (build.tpl.yml) reads them from build/ to match.
+    output = wf(output)
     if telnet_transport:
         # No ssh in the guest to cat a key out of; publish the host's pubkey
         # so the sidecar asset set stays complete (unused at runtime).
@@ -3810,7 +3846,7 @@ def main(argv):
 
     if env("VM_ISO_LINK"):
         log("Clean up ISO for more space")
-        try: os.remove("%s.iso" % osname)
+        try: os.remove(wf("%s.iso" % osname))
         except OSError: pass
 
     log("contents of home directory:"); sh("ls -lah")

@@ -63,12 +63,14 @@ jobs:
         # One artifact per matrix job, so they don't collide and each can be
         # downloaded independently from the run page.
         name: plan9-${{ matrix.os }}
+        # build.py writes all generated files (including these release
+        # artifacts) under build/ to keep the repo root clean; see wf().
         path: |
-          plan9-${{ matrix.os }}.qcow2.zst*
-          plan9-${{ matrix.os }}-id_rsa.pub
-          plan9-${{ matrix.os }}-host.id_rsa
-          plan9-${{ matrix.os }}.qemu
-          plan9-${{ matrix.os }}.profile.json
+          build/plan9-${{ matrix.os }}.qcow2.zst*
+          build/plan9-${{ matrix.os }}-id_rsa.pub
+          build/plan9-${{ matrix.os }}-host.id_rsa
+          build/plan9-${{ matrix.os }}.qemu
+          build/plan9-${{ matrix.os }}.profile.json
         if-no-files-found: warn
         # qcow2.zst is already maximally compressed; gzip-recompressing the
         # bundle just burns CPU for ~0 savings.
@@ -96,11 +98,11 @@ jobs:
         # release event -> github.event.release.tag_name; tag push -> github.ref_name.
         tag_name: ${{ github.event.release.tag_name || github.ref_name }}
         files: |
-          plan9-${{ matrix.os }}.qcow2.zst*
-          plan9-${{ matrix.os }}-id_rsa.pub
-          plan9-${{ matrix.os }}-host.id_rsa
-          plan9-${{ matrix.os }}.qemu
-          plan9-${{ matrix.os }}.profile.json
+          build/plan9-${{ matrix.os }}.qcow2.zst*
+          build/plan9-${{ matrix.os }}-id_rsa.pub
+          build/plan9-${{ matrix.os }}-host.id_rsa
+          build/plan9-${{ matrix.os }}.qemu
+          build/plan9-${{ matrix.os }}.profile.json
 
 
 
