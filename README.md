@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/anyvm-org/plan9-builder/actions/workflows/build.yml/badge.svg)](https://github.com/anyvm-org/plan9-builder/actions/workflows/build.yml)
 
-Latest: v1.0.0
+Latest: v2.0.0
 
 
 The image builder for `plan9`
