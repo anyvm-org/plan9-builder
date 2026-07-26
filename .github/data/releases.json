@@ -1,0 +1,14 @@
+{
+  "os": "plan9",
+  "releases": [
+    {
+      "tag": "11554",
+      "release": "11554",
+      "arch": "x86_64",
+      "sync": "9p",
+      "shutdown": "fshalt",
+      "desktop": false,
+      "build": true
+    }
+  ]
+}
