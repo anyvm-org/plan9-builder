@@ -9,6 +9,15 @@
       "shutdown": "fshalt",
       "desktop": false,
       "build": true
+    },
+    {
+      "tag": "11952",
+      "release": "11952",
+      "arch": "x86_64",
+      "sync": "9p",
+      "shutdown": "fshalt",
+      "desktop": false,
+      "build": true
     }
   ]
 }
