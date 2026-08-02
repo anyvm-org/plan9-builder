@@ -14,6 +14,7 @@ All the supported releases are here:
 
 | Release (9front) | x86_64 (amd64) |
 |---------|---------|
+| 11952 | ✅ (9p) |
 | 11554 | ✅ (9p) |
 
 <!-- release-label: Release (9front) -->
@@ -34,6 +35,6 @@ How to build:
 
     Just clone the repo. and run:
     ```bash
-    python3 build.py conf/plan9-11554.conf
+    python3 build.py conf/plan9-11952.conf
     ```
    
