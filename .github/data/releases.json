@@ -8,7 +8,7 @@
       "sync": "9p",
       "shutdown": "fshalt",
       "desktop": false,
-      "build": true
+      "build": false
     },
     {
       "tag": "11952",
