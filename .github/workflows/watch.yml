@@ -1,10 +1,10 @@
 name: "Watch upstream"
 
-# Track this OS upstream and land the confs for a new release. The
-# generation layer does the rest: landing a conf on main makes
-# generate.yml regenerate all.release.conf / the tables / releases.json
-# and re-render build.yml with the new matrix, and that commit starts the
-# build. See base-builder/watch.py.
+# Track this OS upstream and land the confs for a new release, switching
+# them on in conf/all.release.conf (the hand-owned build membership).
+# The generation layer does the rest: landing on main makes generate.yml
+# regenerate the tables / releases.json and re-render build.yml with the
+# new matrix, and that commit starts the build. See base-builder/watch.py.
 
 permissions:
   contents: write
